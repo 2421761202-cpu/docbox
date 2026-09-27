@@ -8,11 +8,14 @@
  * 为什么不用 `vite preview`：那个会先加载 vite.config.ts（需要 esbuild 子进程），
  * 而这个脚本只做静态文件服务，行为和 Cloudflare Pages / Netlify / Vercel 上
  * 的 SPA 回退一致，用来验证「真实部署产物」比 dev server 更可靠。
+ *
+ * 两种产物都能预览：根路径构建（`/assets/x.js`）与子路径构建
+ * （`PAGES_BASE=/docbox/` 的产物，资源形如 `/docbox/assets/x.js`）。
  */
 
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,13 +61,9 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 }
 
-async function resolveFile(urlPath) {
-  // 去掉查询串与 hash，并阻止路径穿越
-  const clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0])
-  const safe = normalize(clean).replace(/^([/\\])+/, '')
-  if (safe.startsWith('..') || safe.includes(`..${sep}`)) return null
-
-  const target = join(root, safe)
+/** 把一个 dist 内的相对路径解析成文件；目录则找它的 index.html */
+async function statInDist(relPath) {
+  const target = join(root, relPath)
   try {
     const info = await stat(target)
     if (info.isFile()) return { path: target, size: info.size }
@@ -74,9 +73,35 @@ async function resolveFile(urlPath) {
       if (indexInfo.isFile()) return { path: index, size: indexInfo.size }
     }
   } catch {
-    // 交给下面的 SPA 回退处理
+    // 交给调用方继续尝试其它候选路径
   }
   return null
+}
+
+async function resolveFile(urlPath) {
+  // 去掉查询串与 hash，并阻止路径穿越
+  const clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0])
+  const safe = normalize(clean).replace(/^([/\\])+/, '')
+  if (safe.startsWith('..') || safe.includes(`..${sep}`)) return null
+
+  // 先按原样找；找不到再去掉第一段重试，这样根路径构建（/assets/x.js）和
+  // 子路径构建（/docbox/assets/x.js）的产物都能直接预览。
+  const direct = await statInDist(safe)
+  if (direct) return direct
+
+  const seg = safe.split(/[/\\]+/).filter(Boolean)
+  if (seg.length > 1) return statInDist(join(...seg.slice(1)))
+  return null
+}
+
+/** 从 dist/index.html 推断它是以哪个 base 构建的（'' 或 'docbox'），仅用于打印地址 */
+async function detectPrefix() {
+  try {
+    const html = await readFile(join(root, 'index.html'), 'utf8')
+    return html.match(/"(?:\/([^"/]+))?\/assets\//)?.[1] ?? ''
+  } catch {
+    return ''
+  }
 }
 
 async function spaFallback() {
@@ -120,11 +145,14 @@ const server = createServer(async (req, res) => {
   console.log(`200 ${urlPath}${usedFallback ? ' → index.html (SPA)' : ''} [${headers['content-type'].split(';')[0]}]`)
 })
 
-server.listen(port, host, () => {
-  console.log(`\n静态预览已启动：http://127.0.0.1:${port}`)
+server.listen(port, host, async () => {
+  const prefix = await detectPrefix()
+  const base = prefix ? `/${prefix}/` : '/'
+  console.log(`\n静态预览已启动：http://127.0.0.1:${port}${base}`)
+  if (prefix) console.log(`（dist/ 是用子路径构建的，资源前缀 ${base}）`)
   if (lan) {
     console.log('\n局域网访问（手机 / 其他设备）：')
-    for (const u of lanUrls()) console.log(`  ${u}`)
+    for (const u of lanUrls()) console.log(`  ${u}${base}`)
     console.log('\n（若手机打不开：请确认电脑与手机在同一 Wi-Fi，并在 Windows 防火墙放行 Node.js 的专用/专用网络。）')
   }
   console.log(`\n服务目录：${root}\n`)
