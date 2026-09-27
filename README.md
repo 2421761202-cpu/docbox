@@ -1,5 +1,7 @@
 # DocBox · 免费的在线图片与 PDF 处理工具
 
+> 线上地址：**https://2421761202-cpu.github.io/docbox/**
+
 一个完全在浏览器本地运行的图片 / PDF 工具箱，界面与视觉为独立设计。
 核心选择：**所有运算都在访问者的浏览器里完成，文件不上传任何服务器。**
 
@@ -77,12 +79,15 @@
 
 ```bash
 npm install
-npm run dev        # http://localhost:5180
-npm run typecheck  # tsc --noEmit
-npm test           # 纯逻辑 + PDF 结构操作的自动化测试（无需浏览器）
-npm run build      # 类型检查 + 产出 dist/
-npm run preview    # 用 Vite 预览构建产物 http://localhost:4180
-npm run serve      # 零依赖静态服务器预览 dist/ http://127.0.0.1:4180
+npm run dev         # http://localhost:5180
+npm run typecheck   # tsc --noEmit
+npm test            # 纯逻辑 + PDF 结构操作的自动化测试（无需浏览器）
+npm run build       # 类型检查 + 产出 dist/
+npm run preview     # 用 Vite 预览构建产物 http://localhost:4180
+npm run serve       # 零依赖静态服务器预览 dist/ http://127.0.0.1:4180
+npm run serve:lan   # 同上，但监听 0.0.0.0，并打印局域网地址（手机可访问）
+npm run deploy:pages  # 把 dist/ 发布到 GitHub Pages（见「部署」一节）
+npm run verify:pages  # 线上自检
 ```
 
 > **网络较慢时**（例如国内直连 npm 官方源）安装可能非常久。
@@ -121,24 +126,70 @@ npm run serve      # 零依赖静态服务器预览 dist/ http://127.0.0.1:4180
 ## 部署
 
 构建产物 `dist/` 是纯静态文件，可以放在任何静态托管上。
-但因为使用 `BrowserRouter`（为了网址干净、利于 SEO），**必须配置 SPA 回退**，
-否则直接访问 `/pdf-merge` 会 404。
+因为使用 `BrowserRouter`（为了网址干净、利于 SEO），**必须配置 SPA 回退**，
+否则直接访问 `/pdf/merge` 会 404。
 
-仓库里已经准备好配置文件：
+### 线上地址
+
+网站已部署在 GitHub Pages：**https://2421761202-cpu.github.io/docbox/**
+
+- `main` 分支：源码
+- `gh-pages` 分支：发布产物（本地构建后推送，内容就是 `dist/`）
+- Pages 设置：`Settings → Pages → Source = Deploy from a branch → gh-pages / (root)`
+- 已包含 `.nojekyll`，避免 Jekyll 处理下划线开头的文件
+
+GitHub Pages 部署在 `/<repo>/` 子路径下，构建时必须加前缀，否则 `/assets/...`
+会指向域名根路径而 404：
+
+```powershell
+# Windows PowerShell（路径要和仓库名一致）
+$env:PAGES_BASE='/docbox/'; npm run build
+```
+
+路由侧由 `src/main.tsx` 的 `basename={import.meta.env.BASE_URL}` 自动跟随 base，
+本地构建（不设 `PAGES_BASE`）时 base 为 `/`，同一份代码两边都能跑。
+
+发布步骤：
+
+```powershell
+$env:PAGES_BASE='/docbox/'; npm run build   # 1. 构建（务必带 PAGES_BASE）
+npm run deploy:pages                        # 2. 自动补 404.html / .nojekyll 并推 gh-pages
+npm run verify:pages                        # 3. 线上自检（Pages 构建需 30~90 秒）
+```
+
+`npm run deploy:pages` 会从 `origin` 推导出 owner/repo 与子路径，并**校验 `dist/`
+的资源前缀**：如果不匹配就直接报错并提示正确的构建命令，避免误发一个资源全 404
+的版本。
+
+Pages 不认 `_redirects`，所以深层链接（如 `/docbox/pdf/merge`）靠 **404.html 副本**
+返回应用外壳：浏览器能正常渲染并完成路由，但 HTTP 状态码是 404，链接预览类爬虫
+会视为不存在——分享时给首页地址即可。若更在意状态码，把 `BrowserRouter` 换成
+`HashRouter`（见下）。
+
+发布后自检（等 Pages 构建完再跑，脚本会自己重试等待）：
+
+```bash
+npm run verify:pages                              # 默认检查上面的线上地址
+node scripts/verify-pages.mjs https://x.y/z/      # 也可检查别的站点
+```
+
+### 其他平台的配置
 
 | 平台 | 需要的东西 | 状态 |
 |---|---|---|
 | Cloudflare Pages / Netlify | `public/_redirects` | 已包含 |
 | Vercel | `vercel.json` | 已包含 |
+| GitHub Pages | 构建时复制出 `dist/404.html` | 见上 |
 | Nginx / 自建 | `try_files $uri $uri/ /index.html;` | 自行配置 |
 | 对象存储（OSS / COS） | 设置 404 页面为 `index.html` | 自行配置 |
 
-如果托管平台不支持重写规则，把 `src/main.tsx` 里的 `BrowserRouter` 换成 `HashRouter`
-即可（网址会变成 `/#/pdf-merge`，但不需要任何服务端配置，也能在 `file://` 下打开）。
+如果托管平台既不支持重写规则、也不想用 404.html 回退，把 `src/main.tsx` 里的
+`BrowserRouter` 换成 `HashRouter` 即可（网址变成 `/#/pdf/merge`，不需要任何服务端
+配置，也能在 `file://` 下直接打开）。
 
-### 各平台的构建参数
+### 构建参数
 
-- 构建命令：`npm run build`
+- 构建命令：`npm run build`（部署到子路径时加 `PAGES_BASE=/<repo>/`）
 - 输出目录：`dist`
 - Node 版本：18 以上（开发时使用 26.x）
 
@@ -188,10 +239,11 @@ src/
 
 scripts/
 ├── copy-pdfjs-assets.mjs    把 pdf.js 的字体/CMap 复制到 public/（dev、build 前自动执行）
-├── serve-dist.mjs           零依赖静态服务器，用于预览 dist/
+├── serve-dist.mjs           零依赖静态服务器，用于预览 dist/（--lan 可给局域网设备访问）
 ├── register-ts.mjs          让 Node 能直接 import 源码里的 .ts（仅供测试）
 ├── smoke.mjs                纯函数测试
-└── smoke-pdf.mjs            PDF 结构操作的端到端测试
+├── smoke-pdf.mjs            PDF 结构操作的端到端测试
+└── verify-pages.mjs         线上部署自检（等构建完成，逐个资源真实请求）
 ```
 
 ### 新增一个工具需要改两处

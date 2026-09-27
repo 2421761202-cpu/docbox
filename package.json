@@ -11,6 +11,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4180",
     "serve": "node scripts/serve-dist.mjs",
+    "serve:lan": "node scripts/serve-dist.mjs --lan",
+    "deploy:pages": "node scripts/deploy-pages.mjs",
+    "verify:pages": "node scripts/verify-pages.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/smoke.mjs && node --import ./scripts/register-ts.mjs scripts/smoke-pdf.mjs"
   },
